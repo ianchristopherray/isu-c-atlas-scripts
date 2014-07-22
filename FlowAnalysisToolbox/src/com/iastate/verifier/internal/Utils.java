@@ -19,34 +19,52 @@ import com.ensoftcorp.atlas.core.db.graph.GraphElement.NodeDirection;
 import com.ensoftcorp.atlas.core.db.set.AtlasHashSet;
 import com.ensoftcorp.atlas.core.db.set.AtlasSet;
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
+import com.iastate.atlas.scripts.AnalysisScripts;
 import com.iastate.verifier.main.Config;
 
 public class Utils {
 	
-	public static void addEFGToIndex(com.ensoftcorp.atlas.core.db.graph.Graph cfg, Graph efg){
+	public static void addEFGToIndex(GraphElement functionNode, com.ensoftcorp.atlas.core.db.graph.Graph cfg, Graph efg){
 		HashMap<String, GraphElement> nodeAddressMap = new HashMap<String, GraphElement>();
 		for(GraphElement node : cfg.nodes()){
 			nodeAddressMap.put(node.address().toAddressString(), node);
 		}
+		
+		GraphElement entryNode = com.ensoftcorp.atlas.core.db.graph.Graph.U.createNode();
+		entryNode.attr().put(XCSG.name, "EFG Entry");
+		entryNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
+		entryNode.tags().add(XCSG.controlFlowRoot);
+		nodeAddressMap.put("cfg0", entryNode);
+		GraphElement e = com.ensoftcorp.atlas.core.db.graph.Graph.U.createEdge(functionNode, entryNode);
+		e.tags().add(XCSG.Contains);
+		
+		
+		GraphElement exitNode = com.ensoftcorp.atlas.core.db.graph.Graph.U.createNode();
+		exitNode.attr().put(XCSG.name, "EFG Exit");
+		exitNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
+		exitNode.tags().add(XCSG.controlFlowExitPoint);
+		nodeAddressMap.put("cfg1", exitNode);
+		e = com.ensoftcorp.atlas.core.db.graph.Graph.U.createEdge(functionNode, exitNode);
+		e.tags().add(XCSG.Contains);
 		
 		for(Edge edge : efg.getEdges()){
 			Node fromNode = edge.getSource().getNode();
 			String fromNodeAddress = fromNode.getLabel();
 			GraphElement newFromNode = nodeAddressMap.get(fromNodeAddress);
 			if(newFromNode != null){
-				newFromNode.tags().add("eventFlow");
+				newFromNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
 			}
 			
 			Node toNode = edge.getTarget().getNode();
 			String toNodeAddress = toNode.getLabel();
 			GraphElement newToNode = nodeAddressMap.get(toNodeAddress);
 			if(newToNode != null){
-				newToNode.tags().add("eventFlow");
+				newToNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
 			}
 			
 			if(newFromNode != null && newToNode != null){	
 				GraphElement newEdge = com.ensoftcorp.atlas.core.db.graph.Graph.U.createEdge(newFromNode, newToNode);
-				newEdge.tags().add("eventFlow");
+				newEdge.tags().add(AnalysisScripts.EVENT_FLOW_EDGE);
 			}
 		}
 	}
