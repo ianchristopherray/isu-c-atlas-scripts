@@ -2,7 +2,6 @@ package atlas.c.scripts;
 
 import static com.ensoftcorp.atlas.java.core.script.Common.universe;
 import static com.ensoftcorp.atlas.java.core.script.Common.edges;
-import static com.ensoftcorp.atlas.java.core.script.CommonQueries.methodParameter;
 
 import java.util.HashSet;
 
@@ -20,6 +19,8 @@ import com.iastate.verifier.internal.Utils;
 
 public class Scripts {
 	
+	private static Queries query = new Queries();
+	
 	public void deleteEFGs(){
 		AtlasSet<GraphElement> edges = universe().edgesTaggedWithAll("eventFlow").eval().edges();
 		HashSet<GraphElement> toDelete = new HashSet<GraphElement>(); 
@@ -32,24 +33,18 @@ public class Scripts {
 		}
 	}
 	
-	public Q CFG(String name){
-		Q method = function(name);
-		Q cfg = edges(XCSG.Contains).forward(method).nodesTaggedWithAny(XCSG.ControlFlow_Node).induce(edges(XCSG.ControlFlow_Edge));
-		return cfg;
-	}
-	
 	public Q EFG(String name){
-		Q method = function(name);
+		Q method = query.function(name);
 		Q efg = edges(XCSG.Contains).forward(method).nodesTaggedWithAny("eventFlow").induce(universe().edgesTaggedWithAll("eventFlow"));
 		return efg;
 	}
 	
 	public void analyze(){
-		Q get = functionReturn(function("getbuf"));
+		Q get = query.functionReturn(query.function("getbuf"));
 		Q dfGet = edges(XCSG.DataFlow_Edge).forwardStep(get);
 		Graph g = dfGet.eval();
 		for(GraphElement e : g.leaves()){
-			Q method = getDeclaringMethod(e);
+			Q method = query.getFunctionContainingElement(e);
 			String currentMethod = method.eval().nodes().iterator().next().attr().get(XCSG.name).toString();
 			Q q = analyze(currentMethod);
 			q = Common.extend(q, XCSG.Contains);
@@ -61,12 +56,12 @@ public class Scripts {
 	}
 	
 	public Q analyze(String function){
-		Q get = functionReturn(function("getbuf"));
+		Q get = query.functionReturn(query.function("getbuf"));
 		Q dfGet = edges(XCSG.DataFlow_Edge).forwardStep(get);
 		Graph g = dfGet.eval();
 		Q eprime = null;
 		for(GraphElement e : g.leaves()){
-			Q method = getDeclaringMethod(e);
+			Q method = query.getFunctionContainingElement(e);
 			String currentMethod = method.eval().nodes().iterator().next().attr().get(XCSG.name).toString();
 			if(currentMethod.equals(function)){
 				eprime = Common.toQ(Common.toGraph(e));
@@ -83,7 +78,7 @@ public class Scripts {
 			edgesCount = gprime.edges().size();
 			AtlasSet<GraphElement> leaves = gprime.leaves();
 			for(GraphElement element : leaves){
-				Q method = getDeclaringMethod(element);
+				Q method = query.getFunctionContainingElement(element);
 				if(!method.eval().nodes().isEmpty()){
 					String currentMethod = method.eval().nodes().iterator().next().attr().get(XCSG.name).toString();
 					if(!currentMethod.equals("freebuf")){
@@ -95,13 +90,6 @@ public class Scripts {
 			}
 		}while(nodesCount != dataFlow.eval().nodes().size() && edgesCount != dataFlow.eval().edges().size());
 		return dataFlow;
-	}
-	
-	public Q getDeclaringMethod(GraphElement e){
-		Q declares = edges(XCSG.Contains).reverseStep(Common.toQ(Common.toGraph(e)));
-		declares = edges(XCSG.Contains).reverseStep(declares);
-		Q nodes = declares.nodesTaggedWithAll(XCSG.Function, "isDef");
-		return nodes;
 	}
 	
 	public Q restrictOnControlNodes(Q dataFlow){
@@ -123,7 +111,7 @@ public class Scripts {
 		AtlasSet<GraphElement> functions = functionCalls.nodesTaggedWithAll(XCSG.Function).eval().nodes();
 		for(GraphElement functionCall : functions){
 			String functionName = functionCall.attr().get(XCSG.name).toString();
-			Q cfg = CFG(functionName);
+			Q cfg = query.CFG(functionName);
 			Q intersection = cfg.intersection(controlNodes);
 			H h = new Highlighter(ConflictStrategy.COLOR);
 			h.highlight(intersection, java.awt.Color.RED);
@@ -131,7 +119,7 @@ public class Scripts {
 			Graph g = cfg.eval();
 			DisplayUtil.displayGraph(g, h, "CFG-" + functionName);
 			
-			Utils.addEFGToIndex(g, Utils.createEventFlowGraph(g, intersection.eval().nodes()));
+			Utils.addEFGToIndex(functionCall, g, Utils.createEventFlowGraph(g, intersection.eval().nodes()));
 			Q efg = EFG(functionName);
 			
 			DisplayUtil.displayGraph(efg.eval(), h, "EFG-" + functionName);
@@ -139,30 +127,5 @@ public class Scripts {
 			//GraphUtils.write(Utils.transformAtlasGraph(g, intersection.eval().nodes()),"/home/ahmed/Desktop/cfg.dot");
 			//GraphUtils.write(Utils.createEventFlowGraph(g, intersection.eval().nodes()),"/home/ahmed/Desktop/efg.dot");
 		}
-	}
-	
-	public Q function(String name) { 
-		return universe().nodesTaggedWithAll(XCSG.Function, "isDef").selectNode(XCSG.name, name); 
-	}
-	
-	public Q functionReturn(Q functions) {
-		return edges(XCSG.Contains).forwardStep(functions).nodesTaggedWithAll(XCSG.MasterReturn);
-	}
-
-	public void bufferFlow() {
-		Q get = functionReturn(function("getbuf"));
-		Q free = methodParameter(function("freebuf"), 0);
-
-		Q dfFree = edges(XCSG.DataFlow_Edge).reverse(free);
-		Q dfGet = edges(XCSG.DataFlow_Edge).forward(get);
-		
-		H h = new Highlighter(ConflictStrategy.COLOR);
-		h.highlight(dfGet, java.awt.Color.GREEN);
-		h.highlight(dfFree, java.awt.Color.BLUE);
-		Q q = dfFree.union(dfGet);
-		q = Common.extend(q, XCSG.Contains);
-		Graph g = q.eval();
-		DisplayUtil.displayGraph(g, h);
-		
 	}
 }
