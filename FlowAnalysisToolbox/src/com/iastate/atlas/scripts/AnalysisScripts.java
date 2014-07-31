@@ -4,11 +4,7 @@ import static com.ensoftcorp.atlas.java.core.script.Common.universe;
 import static com.ensoftcorp.atlas.java.core.script.Common.edges;
 import static com.ensoftcorp.atlas.java.core.script.CommonQueries.methodParameter;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
 
 import atlas.c.scripts.Queries;
 
@@ -16,7 +12,6 @@ import com.ensoftcorp.atlas.core.db.graph.Graph;
 import com.ensoftcorp.atlas.core.db.graph.GraphElement;
 import com.ensoftcorp.atlas.core.db.set.AtlasHashSet;
 import com.ensoftcorp.atlas.core.db.set.AtlasSet;
-import com.ensoftcorp.atlas.core.index.common.SourceCorrespondence;
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
 import com.ensoftcorp.atlas.java.core.highlight.H;
 import com.ensoftcorp.atlas.java.core.highlight.Highlighter;
@@ -27,11 +22,7 @@ import com.ensoftcorp.atlas.ui.viewer.graph.DisplayUtil;
 import com.iastate.verifier.internal.Utils;
 
 public class AnalysisScripts {
-	
-	public static String EVENT_FLOW_EDGE = "eventFlow";
-	
-	public static String EVENT_FLOW_NODE = "eventFlow";
-	
+		
 	public static AtlasSet<GraphElement> atomicFunctions;
 	
 	private static Queries query = new Queries();
@@ -41,58 +32,15 @@ public class AnalysisScripts {
 		atomicFunctions.addAll(query.function("getbuf").eval().nodes());
 		atomicFunctions.addAll(query.function("freebuf").eval().nodes());
 		
+		atomicFunctions.addAll(query.function("kmalloc").eval().nodes());
+		atomicFunctions.addAll(query.function("kfree").eval().nodes());
+		
 		atomicFunctions.addAll(query.function("__mutex_init").eval().nodes());
 		atomicFunctions.addAll(query.function("mutex_lock").eval().nodes());
 		atomicFunctions.addAll(query.function("mutex_trylock").eval().nodes());
 		atomicFunctions.addAll(query.function("mutex_lock_killable").eval().nodes());
 		atomicFunctions.addAll(query.function("mutex_lock_interruptible").eval().nodes());
 		atomicFunctions.addAll(query.function("mutex_unlock").eval().nodes());
-	}
-	
-	/**
-	 * Remove "eventFlow" tag from all nodes and edges
-	 */
-	public void deleteEFGs(){
-		AtlasSet<GraphElement> edges = universe().edgesTaggedWithAll(EVENT_FLOW_EDGE).eval().edges();
-		HashSet<GraphElement> toDelete = new HashSet<GraphElement>(); 
-		for(GraphElement edge : edges){
-			toDelete.add(edge);
-		}
-		
-		for(GraphElement edge : toDelete){
-			Graph.U.delete(edge);
-		}
-		
-		AtlasSet<GraphElement> nodes = universe().nodesTaggedWithAll(EVENT_FLOW_NODE).eval().nodes();
-		
-		HashSet<GraphElement> ns = new HashSet<GraphElement>();
-		for(GraphElement node : nodes){
-			ns.add(node);
-		}
-		
-		toDelete = new HashSet<GraphElement>(); 
-		for(GraphElement node : ns){
-			node.tags().remove(EVENT_FLOW_NODE);
-			String name = (String) node.attr().get(XCSG.name);
-			if(name.equals("EFG Entry") || name.equals("EFG Exit")){
-				toDelete.add(node);
-			}
-		}
-		
-		for(GraphElement node : toDelete){
-			Graph.U.delete(node);
-		}
-	}
-	
-	/**
-	 * Returns the Event Flow Graph of a given function name
-	 * @param name: The name of function
-	 * @return The EFG of a function
-	 */
-	public Q EFG(String name){
-		Q method = query.function(name);
-		Q efg = universe().edgesTaggedWithAny(XCSG.Contains, EVENT_FLOW_EDGE).forward(method).nodesTaggedWithAny(EVENT_FLOW_NODE).induce(universe().edgesTaggedWithAll(EVENT_FLOW_EDGE));
-		return efg;
 	}
 	
 	/**
@@ -150,7 +98,7 @@ public class AnalysisScripts {
 	
 	public void verifyProperty(AtlasSet<GraphElement> e1, AtlasSet<GraphElement> e2, AtlasSet<GraphElement> eventCallSites){
 		for(GraphElement callSite : eventCallSites){
-			deleteEFGs();
+			query.deleteEFGs();
 			GraphElement containingMethod = query.getFunctionContainingElement(callSite).eval().nodes().getFirst();
 			if(!containingMethod.attr().get(XCSG.name).equals("dswrite"))
 				continue;
@@ -179,7 +127,7 @@ public class AnalysisScripts {
 				//GraphUtils.write(Utils.transformAtlasGraph(g, intersection.eval().nodes()),"/home/ahmed/Desktop/cfg-"+functionName+".dot");
 				
 				Utils.addEFGToIndex(function, g, Utils.createEventFlowGraph(g, intersection.eval().nodes()));
-				Q efg = EFG(functionName);
+				Q efg = query.EFG(functionName);
 				
 				//DisplayUtil.displayGraph(efg.eval(), h, "EFG-" + functionName);
 				functionFlowMap.put(function, efg.eval());
@@ -195,206 +143,6 @@ public class AnalysisScripts {
 		AtlasSet<GraphElement> e2 = query.function("mutex_unlock").eval().nodes();
 		AtlasSet<GraphElement> eventCallSites = getEventCallSitesFromParameter(e1, 0);
 		verifyProperty(e1, e2, eventCallSites);
-	}
-	
-	public Q test2(int number){
-		
-		HashSet<String> locks = new HashSet<String>();
-		locks.add("mutex_lock_interruptible");
-		locks.add("mutex_lock");
-		locks.add("mutex_trylock");
-		locks.add("mutex_lock_killable");
-		
-		HashSet<String> unlocks = new HashSet<String>();
-		unlocks.add("mutex_unlock");
-		
-		AtlasSet<GraphElement> e1 = new AtlasHashSet<GraphElement>();
-		for(String l : locks){
-			e1.addAll(query.function(l).eval().nodes());
-		}
-		Q e1Functions = Common.toQ(Common.toGraph(e1));
-		
-		AtlasSet<GraphElement> e2 = new AtlasHashSet<GraphElement>();
-		for(String u : unlocks){
-			e2.addAll(query.function(u).eval().nodes());
-		}
-		Q e2Functions = Common.toQ(Common.toGraph(e2));
-				
-		Q params = methodParameter(e1Functions.union(e2Functions), 0);
-		
-		Q dfReverseParams = universe().edgesTaggedWithAny(XCSG.DataFlow_Edge, com.ensoftcorp.atlas.c.core.query.Attr.Edge.ADDRESS_OF, com.ensoftcorp.atlas.c.core.query.Attr.Edge.POINTER_DEREFERENCE).reverseStep(params);
-		Q rev = universe().edgesTaggedWithAny(XCSG.DataFlow_Edge, com.ensoftcorp.atlas.c.core.query.Attr.Edge.ADDRESS_OF, com.ensoftcorp.atlas.c.core.query.Attr.Edge.POINTER_DEREFERENCE).reverse(params);
-		
-		AtlasSet<GraphElement> paramsPassed = dfReverseParams.roots().eval().nodes();
-		
-		int count = -1;
-		for(GraphElement parameter : paramsPassed){
-			if(++count == number){
-				deleteEFGs();
-				Q param = Common.toQ(Common.toGraph(parameter));
-				Q dfReverse = universe().edgesTaggedWithAny(XCSG.DataFlow_Edge, com.ensoftcorp.atlas.c.core.query.Attr.Edge.ADDRESS_OF, com.ensoftcorp.atlas.c.core.query.Attr.Edge.POINTER_DEREFERENCE).reverse(param);
-				Q currentSignature = dfReverse.roots().nodesTaggedWithAny(XCSG.Variable);
-				Q between = rev.between(currentSignature, params);
-				//between = Common.extend(between, XCSG.Contains);
-				//DisplayUtil.displayGraph(between.eval());
-				
-				Q dfParams = between.intersection(dfReverseParams).roots();
-				Q controlFlowNodes = universe().edgesTaggedWithAll(XCSG.Contains).reverseStep(dfParams).nodesTaggedWithAll(XCSG.ControlFlow_Node);
-				Q callSites = universe().edgesTaggedWithAll(XCSG.Contains).forward(controlFlowNodes).nodesTaggedWithAll(XCSG.CallSite);
-				//DisplayUtil.displayGraph(callSites.eval());
-				
-				Q mpg = getMPG(callSites, locks, unlocks);
-				
-				mpg = mpg.union(e1Functions, e2Functions);
-				mpg = mpg.induce(universe().edgesTaggedWithAll(XCSG.Call));
-				
-				verify(mpg, controlFlowNodes, e1, e2);
-				
-			}
-		}
-		return null;
-	}
-	
-	public void verify(Q envelope, Q controlFlowNodes, AtlasSet<GraphElement> e1, AtlasSet<GraphElement> e2){
-		HashMap<GraphElement, Graph> functionFlowMap = new HashMap<GraphElement, Graph>();
-		
-		Graph envelopeGraph = envelope.eval();
-		DisplayUtil.displayGraph(envelopeGraph, new Highlighter(), "Envelope");
-		
-		for(GraphElement function : envelopeGraph.nodes()){
-			if(e1.contains(function) || e2.contains(function))
-				continue;
-			
-			String functionName = function.attr().get(XCSG.name).toString();
-			Q cfg = query.CFG(functionName);
-			Q intersection = cfg.intersection(controlFlowNodes);
-			H h = new Highlighter(ConflictStrategy.COLOR);
-			h.highlight(intersection, java.awt.Color.RED);
-			Graph g = cfg.eval();
-			DisplayUtil.displayGraph(g, h, "CFG-" + functionName);
-			
-			Utils.addEFGToIndex(function, g, Utils.createEventFlowGraph(g, intersection.eval().nodes()));
-			Q efg = EFG(functionName);
-			
-			DisplayUtil.displayGraph(efg.eval(), h, "EFG-" + functionName);
-			functionFlowMap.put(function, efg.eval());
-		}
-		//Verifier verifier = new Verifier(callSite.address().toAddressString(), envelope.eval(), functionFlowMap);
-		//verifier.run();
-	}
-	
-	public Q getMPG(Q controlFlowNodes, HashSet<String> locks, HashSet<String> unlocks){
-		AtlasSet<GraphElement> nodes = controlFlowNodes.eval().nodes();
-		HashMap<GraphElement, HashMap<String, AtlasSet<GraphElement>>> functionMap = new HashMap<GraphElement, HashMap<String,AtlasSet<GraphElement>>>(); 
-		
-		for(GraphElement node : nodes){
-			Q functionQ = query.getFunctionContainingElement(node);
-			GraphElement functionNode = functionQ.eval().nodes().getFirst();
-			
-			boolean callingLock = false;
-			boolean callingUnlock = false;
-			if(isCalling(node, locks)){
-				callingLock = true;
-			}
-			
-			if(isCalling(node, unlocks)){
-				callingUnlock = true;
-			}
-			
-			if(callingLock || callingUnlock){
-				HashMap<String, AtlasSet<GraphElement>> luMap = new HashMap<String, AtlasSet<GraphElement>>();
-				
-				if(functionMap.containsKey(functionNode)){
-					luMap = functionMap.get(functionNode);
-				}
-				
-				if(callingLock){
-					AtlasSet<GraphElement> callL = new AtlasHashSet<GraphElement>();
-					if(luMap.containsKey("L")){
-						callL = luMap.get("L");
-					}
-					callL.add(node);
-					luMap.put("L", callL);
-				}
-				
-				if(callingUnlock){
-					AtlasSet<GraphElement> callU = new AtlasHashSet<GraphElement>();
-					if(luMap.containsKey("U")){
-						callU = luMap.get("U");
-					}
-					callU.add(node);
-					luMap.put("U", callU);
-				}
-				functionMap.put(functionNode, luMap);
-			}
-		}
-			
-		AtlasSet<GraphElement> callL = new AtlasHashSet<GraphElement>();
-		AtlasSet<GraphElement> callU = new AtlasHashSet<GraphElement>();
-		AtlasSet<GraphElement> unbalanced = new AtlasHashSet<GraphElement>();
-		
-		for(GraphElement f : functionMap.keySet()){
-			HashMap<String, AtlasSet<GraphElement>> nodesMap = functionMap.get(f);
-			if(nodesMap.size() == 1 && nodesMap.keySet().contains("L")){
-				callL.add(f);
-				continue;
-			}
-			
-			if(nodesMap.size() == 1 && nodesMap.keySet().contains("U")){
-				callU.add(f);
-				continue;
-			}
-			
-			callL.add(f);
-			callU.add(f);
-			
-			AtlasSet<GraphElement> lNodes = nodesMap.get("L");
-			List<Integer> ls = new ArrayList<Integer>();
-			for(GraphElement l : lNodes){
-				SourceCorrespondence sc = (SourceCorrespondence) l.attr().get(XCSG.sourceCorrespondence);
-				ls.add(sc.offset);
-			}
-			AtlasSet<GraphElement> uNodes = nodesMap.get("U");
-			List<Integer> us = new ArrayList<Integer>();
-			for(GraphElement u : uNodes){
-				SourceCorrespondence sc = (SourceCorrespondence) u.attr().get(XCSG.sourceCorrespondence);
-				us.add(sc.offset);
-			}
-			
-			Collections.sort(ls);
-			Collections.sort(us);
-			
-			if(us.get(us.size() - 1) <= ls.get(ls.size() - 1)){
-				unbalanced.add(f);
-				callU.remove(f);
-			}
-		}
-		
-		Q callLQ = Common.toQ(Common.toGraph(callL));
-		Q callUQ = Common.toQ(Common.toGraph(callU));
-		//Q callLU = callLQ.intersection(callUQ);
-		Q rcg_lock = universe().edgesTaggedWithAll(XCSG.Call).reverse(callLQ);
-		Q rcg_unlock = universe().edgesTaggedWithAll(XCSG.Call).reverse(callUQ);
-		Q rcg_both = rcg_lock.intersection(rcg_unlock);
-		Q rcg_c = rcg_lock.union(rcg_unlock);
-		Q rcg_lock_only = rcg_lock.difference(rcg_both);
-		Q rcg_unlock_only = rcg_unlock.difference(rcg_both);
-		Q call_lock_only = callLQ.union(universe().edgesTaggedWithAll(XCSG.Call).reverseStep(rcg_lock_only));
-		Q call_unlock_only = callUQ.union(universe().edgesTaggedWithAll(XCSG.Call).reverseStep(rcg_unlock_only));
-		Q call_c_only = call_lock_only.union(call_unlock_only);
-		Q balanced = call_c_only.intersection(rcg_both);
-		Q ubc = balanced.union(rcg_lock_only, rcg_unlock_only);
-		Q mpg = rcg_c.intersection(universe().edgesTaggedWithAll(XCSG.Call).forward(ubc));
-		
-		return mpg;
-	}
-	
-	public boolean isCalling(GraphElement node, HashSet<String> functions){
-		for(String f : functions){
-			if(((String) node.attr().get(XCSG.name)).contains(f + "("))
-				return true;
-		}
-		return false;
 	}
 	
 	public Q test(int number){
@@ -507,7 +255,7 @@ public class AnalysisScripts {
 	}
 	
 	public void highlightEventNodes(String function){
-		deleteEFGs();
+		query.deleteEFGs();
 		Q dataFlow = analyze(function);
 		Q functionCalls = restrictOnFunctionCalls(dataFlow);
 		Q controlNodes = restrictOnControlNodes(dataFlow);
@@ -524,7 +272,7 @@ public class AnalysisScripts {
 			DisplayUtil.displayGraph(g, h, "CFG-" + functionName);
 			
 			Utils.addEFGToIndex(functionCall, g, Utils.createEventFlowGraph(g, intersection.eval().nodes()));
-			Q efg = EFG(functionName);
+			Q efg = query.EFG(functionName);
 			
 			DisplayUtil.displayGraph(efg.eval(), h, "EFG-" + functionName);
 			

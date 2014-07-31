@@ -1,19 +1,17 @@
 package com.iastate.verifier.main;
 
-import java.io.File;
-import java.io.FilenameFilter;
-import java.util.ArrayList;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
-import com.ensoftcorp.atlas.c.core.query.Attr.Node;
 import com.ensoftcorp.atlas.core.db.graph.Graph;
 import com.ensoftcorp.atlas.core.db.graph.GraphElement;
 import com.ensoftcorp.atlas.core.db.set.AtlasHashSet;
 import com.ensoftcorp.atlas.core.db.set.AtlasSet;
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
+import com.ensoftcorp.atlas.java.core.query.Q;
 import com.iastate.verifier.internal.CFGProcessor;
 import com.iastate.verifier.internal.PathStatus;
 import com.iastate.verifier.internal.Stater;
@@ -31,21 +29,23 @@ public class Verifier {
 	
 	private AtlasSet<GraphElement> problematicLEvents;
 	
-	private HashMap<GraphElement, Graph> functionCFGMap;
+	private HashMap<GraphElement, Graph> functionEFGMap;
+	private HashMap<GraphElement, List<Q>> functionEventsMap;
 	
 	/**
 	 * A HashMap to store each function's summaries based on the analyzed property
 	 */
 	private HashMap<GraphElement, HashMap<String, Object>> functionSummariesMap;
 	
-	public Verifier(String signature, Graph callGraph, HashMap<GraphElement, Graph> functionCFGMap){
+	public Verifier(String signature, Graph callGraph, HashMap<GraphElement, Graph> functionEFGMap, HashMap<GraphElement, List<Q>> functionEventsMap){
 		this.signature = signature;
 		this.envelope = callGraph;
 		this.stater = new Stater();
 		this.functionSummariesMap = new HashMap<GraphElement, HashMap<String,Object>>();
 		this.matchedNodesMap = new HashMap<GraphElement, AtlasSet<GraphElement>>(); 
 		this.problematicLEvents = new AtlasHashSet<GraphElement>();
-		this.functionCFGMap = functionCFGMap;
+		this.functionEFGMap = functionEFGMap;
+		this.functionEventsMap = functionEventsMap;
 	}
 	
 	@SuppressWarnings("unchecked")
@@ -75,11 +75,11 @@ public class Verifier {
 			if(Utils.getParentNodes(this.envelope, function).size() == 0){
 				outStatus = (Integer)this.functionSummariesMap.get(function).get("outs");
 				if((outStatus & PathStatus.LOCK) != 0){
-					danglingLNodes.addAll((HashSet<GraphElement>) this.functionSummariesMap.get(function).get("outl")) ;
+					danglingLNodes.addAll((AtlasHashSet<GraphElement>) this.functionSummariesMap.get(function).get("outl")) ;
 				}
 				
 				if(outStatus == PathStatus.LOCK || outStatus == (PathStatus.LOCK | PathStatus.THROUGH)){
-					notMatchedLocks.addAll((HashSet<GraphElement>) this.functionSummariesMap.get(function).get("outl")) ;
+					notMatchedLocks.addAll((AtlasHashSet<GraphElement>) this.functionSummariesMap.get(function).get("outl")) ;
 				}
 			}
 		}
@@ -102,6 +102,13 @@ public class Verifier {
 		this.stater.done();
 		//logManualCheckingCases(notMatchedLocks, partiallyMatchedNodes);
 		this.stater.printResults("[" + this.signature + "]");
+		
+		try {
+			Utils.writer.flush();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 	}
 	
 	/**
@@ -120,7 +127,9 @@ public class Verifier {
 			calledFunctionsSummary.put(child, (HashMap<String, Object>) this.functionSummariesMap.get(child).clone());
 		
 		Stater perCFGStats = new Stater();
-		CFGProcessor processor = new CFGProcessor(function, this.functionCFGMap.get(function), calledFunctionsSummary, perCFGStats);
+		CFGProcessor processor = new CFGProcessor(function, this.functionEFGMap.get(function), calledFunctionsSummary, perCFGStats);
+		
+		processor.run(this.functionEventsMap.get(function));
 		
 		HashMap<String, Object> functionSummary = (HashMap<String, Object>) processor.getFunctionSummary().clone();
 		this.functionSummariesMap.put(function, functionSummary);
@@ -136,11 +145,11 @@ public class Verifier {
 			
 			int outStatus = (Integer)functionSummary.get("outs");
 			if((outStatus & PathStatus.LOCK) != 0){
-				allLNodesInFunction.addAll((HashSet<GraphElement>) functionSummary.get("outl")) ;
+				allLNodesInFunction.addAll((AtlasHashSet<GraphElement>) functionSummary.get("outl")) ;
 			}
 			
 			if(outStatus == PathStatus.LOCK || outStatus == (PathStatus.LOCK | PathStatus.THROUGH)){
-				allLNodesInFunction.addAll((HashSet<GraphElement>) functionSummary.get("outl")) ;
+				allLNodesInFunction.addAll((AtlasHashSet<GraphElement>) functionSummary.get("outl")) ;
 			}
 			AtlasSet<GraphElement> racedLEvents = Utils.difference(processor.getLEventNodes(), Utils.intersection(allLNodesInFunction, processor.getLEventNodes()));
 			this.problematicLEvents.addAll(racedLEvents);
@@ -176,7 +185,7 @@ public class Verifier {
 	}
 	
 	private Graph getMyGraphNodes(GraphElement node){
-		for(Graph cfg : this.functionCFGMap.values()){
+		for(Graph cfg : this.functionEFGMap.values()){
 			if(cfg.nodes().contains(node))
 				return cfg;
 		}
@@ -205,8 +214,8 @@ public class Verifier {
 	}
 	
 	private String getDebugInformation(GraphElement node, boolean reportSourceCode){
-		for(GraphElement function : this.functionCFGMap.keySet()){
-			Graph cfg = this.functionCFGMap.get(function);
+		for(GraphElement function : this.functionEFGMap.keySet()){
+			Graph cfg = this.functionEFGMap.get(function);
 			if(cfg.nodes().contains(node)){
 				return "MANUAL CHECK EVENT: [" + node.attr().get(XCSG.name) + "] @ Line Number [" + node.attr().get(XCSG.sourceCorrespondence) + "] in Function [" + function.attr().get(XCSG.name) + "]";
 			}

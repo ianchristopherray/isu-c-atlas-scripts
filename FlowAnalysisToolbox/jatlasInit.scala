@@ -19,7 +19,9 @@ import com.ensoftcorp.atlas.core.db.graph.Graph
 import com.ensoftcorp.atlas.java.core.highlight.Highlighter
 import com.ensoftcorp.atlas.java.core.highlight.H
 
-import atlas.c.scripts.Scripts
+import atlas.c.scripts.Scripts;
+import atlas.c.scripts.Queries;
 //import atlas.c.xinu.Xinu
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
 import com.iastate.atlas.scripts.AnalysisScripts;
+import com.iastate.atlas.scripts.LinuxScripts;

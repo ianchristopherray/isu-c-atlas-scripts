@@ -1,19 +1,24 @@
 package com.iastate.verifier.internal;
 
+import static com.ensoftcorp.atlas.java.core.script.Common.universe;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
+import atlas.c.scripts.Queries;
+
 import com.ensoftcorp.atlas.c.core.query.Attr.Node;
-import com.ensoftcorp.atlas.core.db.graph.Address;
 import com.ensoftcorp.atlas.core.db.graph.Graph;
 import com.ensoftcorp.atlas.core.db.graph.GraphElement;
 import com.ensoftcorp.atlas.core.db.set.AtlasHashSet;
 import com.ensoftcorp.atlas.core.db.set.AtlasSet;
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
-import com.iastate.verifier.main.Config;
+import com.ensoftcorp.atlas.java.core.query.Q;
+import com.ensoftcorp.atlas.java.core.script.Common;
+import com.iastate.atlas.scripts.LinuxScripts;
 
 public class CFGProcessor {
 
@@ -47,9 +52,12 @@ public class CFGProcessor {
     private HashMap<GraphElement, AtlasSet<GraphElement>> matchedNodesMap;
     
     private Stater stater;
+    
+    private GraphElement currentFunction;
 	
 	public CFGProcessor(GraphElement function, Graph flowGraph, HashMap<GraphElement, HashMap<String, Object>> summary, Stater stater) {
-		this.calledFunctionsSummary = summary;
+		this.currentFunction = function;
+		this.calledFunctionsSummary = (HashMap<GraphElement, HashMap<String, Object>>) summary.clone();
 		this.flowGraph = flowGraph;
 		
         this.pathToS = new HashMap<GraphElement, Integer>();
@@ -68,14 +76,29 @@ public class CFGProcessor {
         this.stater = stater;
 	}
 	
-	public Graph run(){
-		EventsHighlighter highlighter = new EventsHighlighter(this.signature, this.calledFunctionsSummary);
-		highlighter.colorEvents(this.flowGraph);
+	public Graph run(List<Q> events){
 		
-		this.calledFunctionsSummary = highlighter.getCalledFunctionsSummaries();
-		this.lEventNodes = highlighter.getLEventNodes();
-		this.conditionalLEventNodes = highlighter.getConditionalLEventNodes();
-		this.uEventNodes = highlighter.getUEventNodes();
+		this.lEventNodes = events.get(0).eval().nodes();
+		this.uEventNodes = events.get(1).eval().nodes();
+		
+		HashMap<GraphElement, HashMap<String, Object>> summary = new HashMap<GraphElement, HashMap<String,Object>>();
+		AtlasSet<GraphElement> nodes = events.get(2).eval().nodes();
+		for(GraphElement node : nodes){
+			for(GraphElement calledFunction : this.calledFunctionsSummary.keySet()){
+				Q callSitesQuery = universe().edgesTaggedWithAll(XCSG.Contains).forward(Common.toQ(Common.toGraph(node))).nodesTaggedWithAll(XCSG.CallSite);
+				String calledFunctionName = (String) calledFunction.attr().get(XCSG.name);
+				AtlasSet<GraphElement> callSites = callSitesQuery.eval().nodes();
+				for(GraphElement callSite : callSites){
+					String name = (String) callSite.attr().get(XCSG.name);
+					if(name.contains(calledFunctionName + "(")){
+						summary.put(node, this.calledFunctionsSummary.get(calledFunction));
+					}
+				}
+			}
+		}
+		this.calledFunctionsSummary.clear();
+		this.calledFunctionsSummary = summary;
+		
 		
 		//Graph CFGGraph = GraphUtils.copyGraph(this.flowGraph);
 		
@@ -87,9 +110,9 @@ public class CFGProcessor {
         this.stater.setlEvents(this.lEventNodes.size());
         this.stater.setuEvents(this.uEventNodes.size());
         
-        if(this.isNotBalancedInstance()){
-        	this.stater.setNotBalancedInstances(1);
-        }
+        //if(this.isNotBalancedInstance()){
+        //	this.stater.setNotBalancedInstances(1);
+        //}
     	
         return this.flowGraph;
 	}
@@ -201,7 +224,7 @@ public class CFGProcessor {
 	            	// !goon, visited before with same information
 	                if (this.pathBackS.get(node) != null)
 	                    return new Object []{this.pathBackS.get(node), this.pathBackL.get(node)};
-	                return new Object []{PathStatus.UNKNOWN, new HashSet<Node>()};
+	                return new Object []{PathStatus.UNKNOWN, new AtlasHashSet<GraphElement>()};
 	            }
         	}else{
         		// Lock or Unlock node or special node, stop here either way
@@ -312,7 +335,7 @@ public class CFGProcessor {
     public void duplicateNode(GraphElement node)
     {
     	GraphElement newNode = Graph.U.createNode(node.address());
-    	newNode.tags().add("DUPLICATE");
+    	newNode.tags().add(LinuxScripts.DUPLICATE_NODE);
     	
     	for(String attr : node.attr().keys()){
     		newNode.attr().put(attr, node.attr().get(attr));
@@ -322,15 +345,20 @@ public class CFGProcessor {
     		newNode.tags().add(tag);
     	}
     	
-    	this.flowGraph.nodes().add(newNode);
+    	//this.flowGraph.nodes().add(newNode);
         
         for(GraphElement child : Utils.getChildNodes(this.flowGraph, node)){
-        	this.flowGraph.addEdge(newNode, child, this.flowGraph.findEdge(node, child).getAttributes());
+        	GraphElement currentEdge = Utils.findEdge(this.flowGraph, node, child);
+        	Utils.createEdge(currentEdge, newNode, child);
+        	//this.flowGraph.edges().add(Utils.createEdge(currentEdge, newNode, child));
         }
         
         for(GraphElement parent : Utils.getParentNodes(this.flowGraph, node)){
-        	this.flowGraph.addEdge(parent, newNode, this.flowGraph.findEdge(parent, node).getAttributes());
+        	GraphElement currentEdge = Utils.findEdge(this.flowGraph, parent, node);
+        	Utils.createEdge(currentEdge, parent, newNode);
+        	//this.flowGraph.edges().add(Utils.createEdge(currentEdge, parent, newNode));
         }
+        this.flowGraph = universe().edgesTaggedWithAny(XCSG.Contains, Queries.EVENT_FLOW_EDGE).forward(Common.toQ(Common.toGraph(this.currentFunction))).nodesTaggedWithAny(Queries.EVENT_FLOW_NODE).induce(universe().edgesTaggedWithAll(Queries.EVENT_FLOW_EDGE)).eval();
     }
     
     public AtlasSet<GraphElement> getLEventNodes(){

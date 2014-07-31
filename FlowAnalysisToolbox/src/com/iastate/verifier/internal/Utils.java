@@ -1,10 +1,15 @@
 package com.iastate.verifier.internal;
 
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+
+import atlas.c.scripts.Queries;
 
 import com.alexmerz.graphviz.ParseException;
 import com.alexmerz.graphviz.Parser;
@@ -19,10 +24,38 @@ import com.ensoftcorp.atlas.core.db.graph.GraphElement.NodeDirection;
 import com.ensoftcorp.atlas.core.db.set.AtlasHashSet;
 import com.ensoftcorp.atlas.core.db.set.AtlasSet;
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
-import com.iastate.atlas.scripts.AnalysisScripts;
-import com.iastate.verifier.main.Config;
+import com.iastate.atlas.scripts.LinuxScripts;
 
 public class Utils {
+	
+	public static FileWriter writer = null;
+    
+	/**
+	 * Log File Location
+	 */
+	public static String LOG_FILE;
+	
+	/**
+     * Debug level 
+     */
+    public static int DEBUG_LEVEL;
+    
+    /**
+     * Error level
+     */
+    public static int ERROR_LEVEL;
+	
+	static{
+		DEBUG_LEVEL = 2;
+		ERROR_LEVEL = 10;
+		LOG_FILE = "/home/atamrawi/Desktop/log.txt";
+		try {
+			writer = new FileWriter(LOG_FILE);
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+	}
 	
 	public static void addEFGToIndex(GraphElement functionNode, com.ensoftcorp.atlas.core.db.graph.Graph cfg, Graph efg){
 		HashMap<String, GraphElement> nodeAddressMap = new HashMap<String, GraphElement>();
@@ -32,7 +65,7 @@ public class Utils {
 		
 		GraphElement entryNode = com.ensoftcorp.atlas.core.db.graph.Graph.U.createNode();
 		entryNode.attr().put(XCSG.name, "EFG Entry");
-		entryNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
+		entryNode.tags().add(Queries.EVENT_FLOW_NODE);
 		entryNode.tags().add(XCSG.controlFlowRoot);
 		nodeAddressMap.put("cfg0", entryNode);
 		GraphElement e = com.ensoftcorp.atlas.core.db.graph.Graph.U.createEdge(functionNode, entryNode);
@@ -41,7 +74,7 @@ public class Utils {
 		
 		GraphElement exitNode = com.ensoftcorp.atlas.core.db.graph.Graph.U.createNode();
 		exitNode.attr().put(XCSG.name, "EFG Exit");
-		exitNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
+		exitNode.tags().add(Queries.EVENT_FLOW_NODE);
 		exitNode.tags().add(XCSG.controlFlowExitPoint);
 		nodeAddressMap.put("cfg1", exitNode);
 		e = com.ensoftcorp.atlas.core.db.graph.Graph.U.createEdge(functionNode, exitNode);
@@ -52,19 +85,19 @@ public class Utils {
 			String fromNodeAddress = fromNode.getLabel();
 			GraphElement newFromNode = nodeAddressMap.get(fromNodeAddress);
 			if(newFromNode != null){
-				newFromNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
+				newFromNode.tags().add(Queries.EVENT_FLOW_NODE);
 			}
 			
 			Node toNode = edge.getTarget().getNode();
 			String toNodeAddress = toNode.getLabel();
 			GraphElement newToNode = nodeAddressMap.get(toNodeAddress);
 			if(newToNode != null){
-				newToNode.tags().add(AnalysisScripts.EVENT_FLOW_NODE);
+				newToNode.tags().add(Queries.EVENT_FLOW_NODE);
 			}
 			
 			if(newFromNode != null && newToNode != null){	
 				GraphElement newEdge = com.ensoftcorp.atlas.core.db.graph.Graph.U.createEdge(newFromNode, newToNode);
-				newEdge.tags().add(AnalysisScripts.EVENT_FLOW_EDGE);
+				newEdge.tags().add(Queries.EVENT_FLOW_EDGE);
 			}
 		}
 	}
@@ -156,6 +189,31 @@ public class Utils {
 		Edge newEdge = new Edge(new PortNode(from), new PortNode(to), graph.getType());
 		graph.addEdge(newEdge);
 		return newEdge;
+	}
+	
+	public static GraphElement findEdge(com.ensoftcorp.atlas.core.db.graph.Graph graph, GraphElement from, GraphElement to){
+		AtlasSet<GraphElement> edges = graph.edges(from, NodeDirection.OUT);
+		for(GraphElement edge : edges){
+			GraphElement node = edge.getNode(EdgeDirection.TO);
+			if(node.equals(to)){
+				return edge;
+			}
+		}
+		return null;
+	}
+	
+	public static GraphElement createEdge(GraphElement edge, GraphElement from, GraphElement to){
+		GraphElement newEdge = com.ensoftcorp.atlas.core.db.graph.Graph.U.createEdge(from, to);
+		newEdge.tags().add(LinuxScripts.DUPLICATE_EDGE);
+    	
+    	for(String attr : edge.attr().keys()){
+    		newEdge.attr().put(attr, edge.attr().get(attr));
+    	}
+    	
+    	for(String tag : edge.tags()){
+    		newEdge.tags().add(tag);
+    	}
+    	return newEdge;
 	}
 	
 	public static String escape(String str){
@@ -289,14 +347,38 @@ public class Utils {
 	
 	public static void debug(int level, String message)
 	{
-		if(level <= Config.DEBUG_LEVEL)
-			System.out.println("[DEBUG(" + level + ")]:" + message);
+		if(level <= DEBUG_LEVEL){
+			try {
+				writer.write("[DEBUG(" + level + ")]:" + message + "\n");
+				writer.flush();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
 	}
 	
 	public static void error(int level, String message)
 	{
-		if(level <= Config.ERROR_LEVEL)
-			System.err.println("[ERROR(" + level + ")]:" + message);		
+		if(level <= ERROR_LEVEL){
+			try {
+				writer.write("[ERROR(" + level + ")]:" + message);
+				writer.flush();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+	}
+	
+	public static void closeLog(){
+		try {
+			writer.flush();
+			writer.close();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 	}
 	
 	public static AtlasSet<GraphElement> difference(AtlasSet<GraphElement> a, AtlasSet<GraphElement> b){
@@ -320,6 +402,14 @@ public class Utils {
 		for(GraphElement i : b){
 			if(!result.contains(i))
 				result.remove(i);
+		}
+		return result;
+	}
+	
+	public static AtlasSet<GraphElement> toAtlasSet(HashSet<GraphElement> list){
+		AtlasSet<GraphElement> result = new AtlasHashSet<GraphElement>();
+		for(GraphElement element : list){
+			result.add(element);
 		}
 		return result;
 	}
