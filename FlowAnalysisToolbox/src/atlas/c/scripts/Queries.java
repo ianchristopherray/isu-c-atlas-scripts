@@ -15,7 +15,6 @@ import java.util.List;
 import com.ensoftcorp.atlas.c.core.query.Attr.Edge;
 import com.ensoftcorp.atlas.core.db.graph.Graph;
 import com.ensoftcorp.atlas.core.db.graph.GraphElement;
-import com.ensoftcorp.atlas.core.db.graph.GraphElement.NodeDirection;
 import com.ensoftcorp.atlas.core.db.set.AtlasHashSet;
 import com.ensoftcorp.atlas.core.db.set.AtlasSet;
 import com.ensoftcorp.atlas.core.index.common.SourceCorrespondence;
@@ -39,12 +38,73 @@ public class Queries {
 	}
 	
 	/**
+	 * Returns the set of functions that correspond to the passed names
+	 * @param names
+	 * @return The set of nodes representing the function names in arguments
+	 */
+	public Q includes(String... names){
+		Q functions = Common.empty();
+		for(String n : names){
+			functions = functions.union(function(n));
+		}
+		return functions;
+	}
+	
+	/**
 	 * Returns the global variable given by the name
 	 * @param name
 	 * @return global variable by the given name
 	 */
 	public Q global(String name){
 		return universe().nodesTaggedWithAll(XCSG.GlobalVariable).selectNode(XCSG.name, name);
+	}
+	
+	/**
+	 * Returns the type node that represents the structure given by the passed name
+	 * @param name
+	 * @return The structure node for the given name
+	 */
+	public Q Type(String name){
+		return universe().nodesTaggedWithAll(XCSG.C.Struct).selectNode(XCSG.name, "struct " + name);
+	}
+	
+	/**
+	 * Returns the set of functions referencing (read from or write to) the given global variable or type
+	 * @param object of interest
+	 * @return The set of functions referencing the passed object
+	 */
+	public Q ref(Q object){
+		if(object.eval().nodes().getFirst().tags().contains(XCSG.GlobalVariable)){
+			return refVariable(object);
+		}
+		if(object.eval().nodes().getFirst().tags().contains(XCSG.C.Struct)){
+			return refType(object);
+		}
+		return null;
+	}
+	
+	/**
+	 * The set of functions referencing a given type
+	 * @param type
+	 * @return
+	 */
+	public Q refType(Q type){
+		Q ref = Common.edges(XCSG.TypeOf, Edge.ELEMENTTYPE, "arrayOf", "pointerOf").reverse(type);
+		ref = Common.extend(ref, XCSG.Contains);
+		return ref.nodesTaggedWithAll(XCSG.Function, "isDef").induce(universe().edgesTaggedWithAny(XCSG.Call));
+	}
+	
+	/**
+	 * The set of functions referencing a given global variable
+	 * @param variable
+	 * @return
+	 */
+	public Q refVariable(Q variable){
+		Q read =  universe().edgesTaggedWithAny(Edge.READ, Edge.READ_CLASS, Edge.READ_FUNCTION, Edge.READ_INSTANCE, Edge.READ_VARIABLE).reverseStep(variable);
+		Q write = universe().edgesTaggedWithAll(Edge.WRITE, Edge.WRITE_INSTANCE, Edge.WRITE_VARIABLE).reverseStep(variable);
+		Q all = read.union(write);
+		all = Common.extend(all, XCSG.Contains);
+		return all.nodesTaggedWithAll(XCSG.Function, "isDef").induce(universe().edgesTaggedWithAny(XCSG.Call));
 	}
 	
 	/**
@@ -116,25 +176,6 @@ public class Queries {
 	}
 	
 	/**
-	 * Returns the set of functions referencing the specified argument
-	 * @param arg
-	 * @return the set of functions referencing (read/write) the specified argument
-	 */
-	public Q ref(Q arg){
-		GraphElement node = arg.eval().nodes().getFirst();
-		AtlasSet<GraphElement> inEdges = Graph.U.edges(node, NodeDirection.IN);
-		AtlasSet<GraphElement> declReprEdges = inEdges.taggedWithAny(XCSG.Contains, Edge.REPR);
-		if(inEdges.size() == declReprEdges.size())
-			return arg;
-		
-		for(GraphElement e : declReprEdges){
-			inEdges.remove(e);
-		}
-		Q edges = Common.toQ(Common.toGraph(inEdges));
-		return edges.reverseStep(arg);
-	}
-	
-	/**
 	 * Returns the call site nodes for a given function
 	 * @param functions
 	 * @return The call site nodes
@@ -158,6 +199,23 @@ public class Queries {
 		return getFunctionContainingElement(Common.toQ(Common.toGraph(e)));
 	}
 	
+	public Q script(){
+		Q getbuf = function("getbuf");
+		Q freebuf = function("freebuf");
+		Q dreq = Type("dreq");
+		return mpg(getbuf, freebuf, dreq);
+	}
+	
+	/**
+	 * Returns the call graph between the roots and leaves
+	 * @param roots
+	 * @param leaves
+	 * @return
+	 */
+	public Q graph(Q roots, Q leaves){
+		 return rcg(leaves).between(roots, leaves);
+	}
+	
 	/**
 	 * Returns the type of for a given query
 	 * @param q
@@ -166,6 +224,40 @@ public class Queries {
 	public Q typeOf(Q q) {
 		Q res = Common.edges(XCSG.TypeOf, Edge.ELEMENTTYPE, "arrayOf", "pointerOf").forward(q);
 		return res;
+	}
+	
+	/**
+	 * Returns the Matching Pair Graph for given object and event functions
+	 * @param e1Functions
+	 * @param e2Functions
+	 * @param object
+	 * @return the matching pair graph for object (object)
+	 */
+	public Q mpg(Q e1Functions, Q e2Functions, Q object){
+		Q callL = call(e1Functions);
+		Q callU = call(e2Functions);
+		if(object.eval().nodes().getFirst().tags().contains(XCSG.GlobalVariable)){
+			callL = callL.intersection(refVariable(object));
+			callU = callU.intersection(refVariable(object));
+		}else if(object.eval().nodes().getFirst().tags().contains(XCSG.C.Struct)){
+			callL = callL.intersection(refType(object));
+			callU = callU.intersection(refType(object));
+		}
+		Q rcg_lock = universe().edgesTaggedWithAll(XCSG.Call).reverse(callL);
+		Q rcg_unlock = universe().edgesTaggedWithAll(XCSG.Call).reverse(callU);
+		Q rcg_both = rcg_lock.intersection(rcg_unlock);
+		Q rcg_c = rcg_lock.union(rcg_unlock);
+		Q rcg_lock_only = rcg_lock.difference(rcg_both);
+		Q rcg_unlock_only = rcg_unlock.difference(rcg_both);
+		Q call_lock_only = callL.union(universe().edgesTaggedWithAll(XCSG.Call).reverseStep(rcg_lock_only));
+		Q call_unlock_only = callU.union(universe().edgesTaggedWithAll(XCSG.Call).reverseStep(rcg_unlock_only));
+		Q call_c_only = call_lock_only.union(call_unlock_only);
+		Q balanced = call_c_only.intersection(rcg_both);
+		Q ubc = balanced.union(rcg_lock_only, rcg_unlock_only);
+		Q mpg = rcg_c.intersection(universe().edgesTaggedWithAll(XCSG.Call).forward(ubc));
+		mpg = mpg.union(e1Functions, e2Functions);
+		mpg = mpg.induce(universe().edgesTaggedWithAll(XCSG.Call));
+		return mpg;
 	}
 	
 	/**

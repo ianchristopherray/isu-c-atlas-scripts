@@ -34,7 +34,7 @@ public class DFReverseStep implements AtlasSmartViewScript {
 //		Q f1 = CommonQueries.dataStep(interpretedSelection, TraversalDirection.FORWARD);
 //		Q f2 = CommonQueries.dataStep(f1, TraversalDirection.FORWARD);
 		
-		Q context = Query.universe().edgesTaggedWithAll(XCSG.DataFlow_Edge);
+		Q context = Query.universe().edgesTaggedWithAll(XCSG.DataFlow_Edge, com.ensoftcorp.atlas.c.core.query.Attr.Edge.ADDRESS_OF, com.ensoftcorp.atlas.c.core.query.Attr.Edge.POINTER_DEREFERENCE);
 		Q r1 = context.reverseStep(interpretedSelection);
 		Q r2 = context.reverseStep(r1);
 		

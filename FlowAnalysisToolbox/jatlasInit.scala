@@ -25,3 +25,4 @@ import atlas.c.scripts.Queries;
 import com.ensoftcorp.atlas.core.xcsg.XCSG;
 import com.iastate.atlas.scripts.AnalysisScripts;
 import com.iastate.atlas.scripts.LinuxScripts;
+import com.iastate.atlas.scripts.FeasibilityChecker;

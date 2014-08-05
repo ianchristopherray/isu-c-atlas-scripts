@@ -26,7 +26,7 @@ public class CallReverseStep implements AtlasSmartViewScript {
 	public StyledResult selectionChanged(SelectionInput input) {
 		Q interpretedSelection = input.getInterpretedSelection();
 
-		Q res = Common.index().edgesTaggedWithAll(XCSG.Call, Edge.PER_METHOD).reverseStep(interpretedSelection);
+		Q res = Common.index().edgesTaggedWithAll(XCSG.Call).reverseStep(interpretedSelection);
 		
 		return new StyledResult(res);
 	}

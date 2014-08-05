@@ -362,7 +362,7 @@ public class Utils {
 	{
 		if(level <= ERROR_LEVEL){
 			try {
-				writer.write("[ERROR(" + level + ")]:" + message);
+				writer.write("[ERROR(" + level + ")]:" + message + "\n");
 				writer.flush();
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
